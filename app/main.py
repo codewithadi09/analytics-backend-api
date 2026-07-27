@@ -17,6 +17,7 @@ from app.api.auth import router as auth_router
 from app.api.dashboard import router as dashboard_router
 from app.api.funnel import router as funnel_router
 from app.api.retention import router as retention_router
+from app.api.user_journey import router as user_journey_router
 from app.core.config import get_settings
 from app.core.redis_client import check_redis_connection, close_redis
 from app.database.connection import check_database_connection, close_pool
@@ -109,3 +110,4 @@ app.include_router(auth_router)
 app.include_router(dashboard_router)
 app.include_router(funnel_router)
 app.include_router(retention_router)
+app.include_router(user_journey_router)
