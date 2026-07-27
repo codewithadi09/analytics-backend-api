@@ -2,11 +2,11 @@
 FastAPI dependencies for authentication.
 
 Import get_current_user into any route that should require a valid
-JWT -- e.g.:
-
-    @router.get("/dashboard/kpis")
-    async def get_kpis(current_user: CurrentUser = Depends(get_current_user)):
-        ...
+JWT. Import require_rate_limit alongside it on routes that should
+also enforce a general-purpose per-user request limit (most routes
+already do this implicitly via the Redis cache reducing repeat
+load, but this is a hard backstop for cache misses and expensive
+uncached endpoints).
 """
 
 import logging
@@ -16,14 +16,19 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError
 
 from app.auth.jwt import TokenRevokedError, verify_access_token
+from app.core.constants import RedisKeyPrefix, build_redis_key
+from app.core.redis_client import get_redis
 from app.schemas.auth import CurrentUser
 
 logger = logging.getLogger(__name__)
 
-# auto_error=True means FastAPI itself returns 401 if the header is
-# missing entirely, before our code even runs -- one less case to
-# handle manually.
 _bearer_scheme = HTTPBearer(auto_error=True)
+
+# General-purpose limit: generous enough that no legitimate dashboard
+# usage pattern (multiple charts loading on page open, filters being
+# adjusted) hits it, but low enough to stop runaway polling loops or
+# scraping. Login has its own stricter, separate limit.
+_GENERAL_RATE_LIMIT_PER_MINUTE = 120
 
 
 async def get_current_user(
@@ -57,3 +62,31 @@ async def get_current_user(
         )
 
     return CurrentUser(email=payload.sub, user_id=payload.sub)
+
+
+async def require_rate_limit(current_user: CurrentUser = Depends(get_current_user)) -> CurrentUser:
+    """
+    General-purpose per-user rate limit, applied on top of
+    authentication. Depends on get_current_user so it always runs
+    AFTER identity is confirmed -- an invalid token gets a 401
+    before ever touching the rate limit counter, so attackers can't
+    burn through a legitimate user's quota with garbage tokens.
+    """
+    redis = await get_redis()
+    key = build_redis_key(RedisKeyPrefix.RATE_LIMIT, "general", current_user.user_id)
+
+    current = await redis.incr(key)
+    if current == 1:
+        await redis.expire(key, 60)
+
+    if current > _GENERAL_RATE_LIMIT_PER_MINUTE:
+        logger.warning("General rate limit exceeded for user_id=%s", current_user.user_id)
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail={
+                "message": "Too many requests. Please slow down.",
+                "code": "RATE_LIMITED",
+            },
+        )
+
+    return current_user

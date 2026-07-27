@@ -6,7 +6,7 @@ All routes require a valid bearer token.
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
-from app.auth.dependencies import get_current_user
+from app.auth.dependencies import require_rate_limit
 from app.core.constants import FUNNEL_STEPS
 from app.schemas.auth import CurrentUser
 from app.schemas.common import PaginatedResponse
@@ -42,7 +42,7 @@ def _validate_funnel_steps(from_step: str, to_step: str) -> None:
 async def get_dropoff_summary_route(
     from_step: str = Query(...),
     to_step: str = Query(...),
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_rate_limit),
 ) -> DropoffSummary:
     _validate_funnel_steps(from_step, to_step)
     return await get_dropoff_summary(from_step, to_step)
@@ -54,7 +54,7 @@ async def get_dropoff_users_route(
     to_step: str = Query(...),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=25, ge=1, le=100),
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_rate_limit),
 ) -> PaginatedResponse[DropoffUser]:
     _validate_funnel_steps(from_step, to_step)
     return await get_dropoff_users_page(from_step, to_step, page=page, page_size=page_size)
@@ -64,6 +64,6 @@ async def get_dropoff_users_route(
 async def get_recent_orders_route(
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=25, ge=1, le=100),
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_rate_limit),
 ) -> PaginatedResponse[RecentOrder]:
     return await get_recent_orders_page(page=page, page_size=page_size)

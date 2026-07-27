@@ -8,7 +8,7 @@ per user are paginated via ?page= and ?page_size= query params.
 
 from fastapi import APIRouter, Depends, Query
 
-from app.auth.dependencies import get_current_user
+from app.auth.dependencies import require_rate_limit
 from app.schemas.auth import CurrentUser
 from app.schemas.common import PaginatedResponse
 from app.schemas.retention import (
@@ -31,14 +31,14 @@ router = APIRouter(prefix="/retention", tags=["retention"])
 async def get_churned_users_route(
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=25, ge=1, le=100),
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_rate_limit),
 ) -> PaginatedResponse[ChurnedUser]:
     return await get_churned_users_page(page=page, page_size=page_size)
 
 
 @router.get("/reengaged", response_model=ReengagedUsersResponse)
 async def get_reengaged_users_route(
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_rate_limit),
 ) -> ReengagedUsersResponse:
     return await get_reengaged_users_summary()
 
@@ -47,13 +47,13 @@ async def get_reengaged_users_route(
 async def get_revenue_per_user_route(
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=25, ge=1, le=100),
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_rate_limit),
 ) -> PaginatedResponse[UserRevenue]:
     return await get_revenue_per_user_page(page=page, page_size=page_size)
 
 
 @router.get("/curve", response_model=RetentionCurveResponse)
 async def get_retention_curve_route(
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_rate_limit),
 ) -> RetentionCurveResponse:
     return await get_retention_curve_summary()
