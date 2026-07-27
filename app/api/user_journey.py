@@ -5,7 +5,7 @@ a single user's full event timeline.
 All routes require a valid bearer token.
 """
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Path, status
 
 from app.auth.dependencies import require_rate_limit
 from app.schemas.auth import CurrentUser
@@ -36,7 +36,7 @@ async def get_user_counts_route(
 
 @router.get("/{user_id}/journey", response_model=UserJourneyResponse)
 async def get_user_journey_route(
-    user_id: str,
+    user_id: str = Path(..., min_length=3, max_length=254),
     current_user: CurrentUser = Depends(require_rate_limit),
 ) -> UserJourneyResponse:
     try:

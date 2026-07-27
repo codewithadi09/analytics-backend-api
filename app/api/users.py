@@ -40,8 +40,8 @@ def _validate_funnel_steps(from_step: str, to_step: str) -> None:
 
 @router.get("/dropoff/summary", response_model=DropoffSummary)
 async def get_dropoff_summary_route(
-    from_step: str = Query(...),
-    to_step: str = Query(...),
+    from_step: str = Query(..., max_length=50),
+    to_step: str = Query(..., max_length=50),
     current_user: CurrentUser = Depends(require_rate_limit),
 ) -> DropoffSummary:
     _validate_funnel_steps(from_step, to_step)
@@ -50,8 +50,8 @@ async def get_dropoff_summary_route(
 
 @router.get("/dropoff", response_model=PaginatedResponse[DropoffUser])
 async def get_dropoff_users_route(
-    from_step: str = Query(...),
-    to_step: str = Query(...),
+    from_step: str = Query(..., max_length=50),
+    to_step: str = Query(..., max_length=50),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=25, ge=1, le=100),
     current_user: CurrentUser = Depends(require_rate_limit),
