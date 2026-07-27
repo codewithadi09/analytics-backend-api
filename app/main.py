@@ -89,13 +89,20 @@ async def http_exception_handler(request: Request, exc: HTTPException) -> JSONRe
 async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
     """
     Catches anything not already handled -- ensures a raw stack trace
-    or internal error message never reaches the client, which could
-    leak file paths, query structure, or library internals.
+    or internal error message never reaches the client in production,
+    which could leak file paths, query structure, or library internals.
+    In DEBUG mode only, the real exception message is included to
+    speed up local debugging.
     """
     logger.exception("Unhandled exception on %s %s", request.method, request.url.path)
+
+    message = "Internal server error"
+    if settings.DEBUG:
+        message = f"Internal server error: {exc}"
+
     return JSONResponse(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        content={"detail": {"message": "Internal server error", "code": "INTERNAL_ERROR"}},
+        content={"detail": {"message": message, "code": "INTERNAL_ERROR"}},
     )
 
 
