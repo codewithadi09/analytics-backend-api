@@ -16,6 +16,7 @@ from fastapi.responses import JSONResponse
 from app.api.auth import router as auth_router
 from app.core.config import get_settings
 from app.core.redis_client import check_redis_connection, close_redis
+from app.database.connection import check_database_connection, close_pool
 
 logging.basicConfig(
     level=logging.INFO,
@@ -38,7 +39,8 @@ async def lifespan(app: FastAPI):
 
     yield
 
-    # Shutdown: close the Redis pool cleanly.
+    # Shutdown: close pools cleanly.
+    await close_pool()
     await close_redis()
     logger.info("Shutdown complete")
 
@@ -92,9 +94,11 @@ async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONR
 async def health_check() -> dict:
     """Basic liveness/readiness check -- includes Redis status."""
     redis_ok = await check_redis_connection()
+    db_ok = await check_database_connection()
     return {
         "status": "ok" if redis_ok else "degraded",
         "redis": "connected" if redis_ok else "unreachable",
+        "database": "connected" if db_ok else "not_configured",
     }
 
 
