@@ -14,6 +14,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from fastapi.responses import JSONResponse
 from app.utils.request_logging import RequestLoggingMiddleware
+from app.utils.security_headers import SecurityHeadersMiddleware
 
 from app.api.auth import router as auth_router
 from app.api.dashboard import router as dashboard_router
@@ -70,7 +71,7 @@ app.add_middleware(
     allow_headers=["Authorization", "Content-Type"],
 )
 app.add_middleware(RequestLoggingMiddleware)
-
+app.add_middleware(SecurityHeadersMiddleware)
 @app.exception_handler(HTTPException)
 async def http_exception_handler(request: Request, exc: HTTPException) -> JSONResponse:
     """
