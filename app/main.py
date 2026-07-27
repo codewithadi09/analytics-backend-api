@@ -11,7 +11,9 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
+
 from fastapi.responses import JSONResponse
+from app.utils.request_logging import RequestLoggingMiddleware
 
 from app.api.auth import router as auth_router
 from app.api.dashboard import router as dashboard_router
@@ -67,7 +69,7 @@ app.add_middleware(
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
     allow_headers=["Authorization", "Content-Type"],
 )
-
+app.add_middleware(RequestLoggingMiddleware)
 
 @app.exception_handler(HTTPException)
 async def http_exception_handler(request: Request, exc: HTTPException) -> JSONResponse:
