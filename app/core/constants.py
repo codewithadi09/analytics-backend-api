@@ -8,37 +8,69 @@ values only. Env-dependent config lives in core/config.py.
 from enum import Enum
 
 
-# ── Funnel / event names ─────────────────────────────────────
-# These match the RudderStack event names already flowing into
-# Postgres (see utils/queries.py in the Streamlit reference app).
-# Keeping this as an Enum (not raw strings scattered everywhere)
-# means a typo becomes an import-time/type error, not a silent
-# empty-result bug in a query.
+# ── Real RudderStack event/table names ───────────────────────
+# Replaces the original fake e-commerce EventName enum (page_view,
+# product_added, order_completed, etc.) from Phases 1-11. These are
+# the confirmed real event/table names in rudder_schema, per the
+# handoff doc's Section 6 table inventory and every domain built in
+# Phase 12. faq_expand/accordion_expand/stat_expand/view_more_btn_click
+# are confirmed to EXIST as tables but haven't had their columns
+# queried by any domain yet -- listed here as known event names only,
+# not implying anything about their internal shape.
 
 class EventName(str, Enum):
-    PAGE_VIEW = "page_view"
-    VIEWED_SERVICE = "viewed_service"
-    USER_SIGNED_UP = "user_signed_up"
-    FORM_SUBMITTED = "form_submitted"
-    PRODUCT_CLICKED = "product_clicked"
-    PRODUCT_ADDED = "product_added"
-    CART_VIEWED = "cart_viewed"
-    CHECKOUT_STARTED = "checkout_started"
-    ORDER_COMPLETED = "order_completed"
+    # Click interactions (16 tables, unified in Domain 2)
+    CTA_CLICK = "cta_click"
+    NAV_CLICK = "nav_click"
+    MENU_CLICK = "menu_click"
+    FOOTER_CLICK = "footer_click"
+    SERVICE_CARD_CLICK = "service_card_click"
+    BLOG_CARD_CLICK = "blog_card_click"
+    SITEMAP_CARD_CLICK = "sitemap_card_click"
+    WORK_CARD_CLICK = "work_card_click"
+    BLOG_CLICK = "blog_click"
+    CASE_STUDY_CLICK = "case_study_click"
+    CASE_STUDY_CTA_CLICK = "case_study_cta_click"
+    OPERATING_RING_CLICK = "operating_ring_click"
+    SOCIAL_CLICK = "social_click"
+    TAG_FILTER_CLICK = "tag_filter_click"
+    PAGINATION_CLICK = "pagination_click"
+    CAROUSEL_CLICK = "carousel_click"
+
+    # Content-expansion interactions (tables confirmed to exist,
+    # columns not yet inspected by any domain)
+    FAQ_EXPAND = "faq_expand"
+    ACCORDION_EXPAND = "accordion_expand"
+    STAT_EXPAND = "stat_expand"
+    VIEW_MORE_BTN_CLICK = "view_more_btn_click"
+
+    # Engagement (Domain 5)
+    SCROLL_DEPTH = "scroll_depth"
+    PAGE_ENGAGED = "page_engaged"
+
+    # Form funnel -- cx_diagnostic (Domains 6-7)
+    FORM_START = "form_start"
+    FORM_FIELD_FOCUS = "form_field_focus"
+    FORM_FIELD_COMPLETE = "form_field_complete"
+    FORM_FIELD_ERROR = "form_field_error"
+    FORM_SUBMIT = "form_submit"
+    FORM_SUBMIT_SUCCESS = "form_submit_success"
 
 
-# Canonical funnel order, top to bottom. Used by the dropoff
-# explorer and funnel chart endpoints so the step sequence is
-# defined once, not re-typed in every service function.
+# ── Real conversion funnel steps ─────────────────────────────
+# Matches exactly the step_name values produced by
+# app/repositories/conversion_repository.py. Deliberately NOT built
+# from EventName above -- "contact_us_page_view" is a page view
+# FILTERED by path, not a distinct RudderStack event name, so the two
+# concepts (raw event names vs. named funnel stages) are no longer
+# the same thing and shouldn't be coupled together the way the old
+# fake e-commerce funnel coupled them.
 FUNNEL_STEPS: list[str] = [
-    EventName.PAGE_VIEW.value,
-    EventName.USER_SIGNED_UP.value,
-    EventName.FORM_SUBMITTED.value,
-    EventName.PRODUCT_CLICKED.value,
-    EventName.PRODUCT_ADDED.value,
-    EventName.CART_VIEWED.value,
-    EventName.CHECKOUT_STARTED.value,
-    EventName.ORDER_COMPLETED.value,
+    "contact_us_page_view",
+    "form_start",
+    "form_field_complete",
+    "form_submit",
+    "form_submit_success",
 ]
 
 
@@ -46,18 +78,15 @@ FUNNEL_STEPS: list[str] = [
 
 class TokenType(str, Enum):
     ACCESS = "access"
-    # Reserved for later if refresh tokens are added (not in Phase 3).
     REFRESH = "refresh"
 
 
 # ── Redis key namespacing ────────────────────────────────────
-# Every Redis key in the app is built through these prefixes so
-# keys are grep-able and collisions across features are impossible.
 
 class RedisKeyPrefix(str, Enum):
-    CACHE = "cache"                 # cached aggregate query results
-    RATE_LIMIT = "ratelimit"        # login rate limiting counters
-    JWT_BLACKLIST = "jwt:blacklist" # revoked token jtis (Phase 3)
+    CACHE = "cache"
+    RATE_LIMIT = "ratelimit"
+    JWT_BLACKLIST = "jwt:blacklist"
 
 
 def build_redis_key(prefix: RedisKeyPrefix, *parts: str) -> str:
@@ -65,22 +94,16 @@ def build_redis_key(prefix: RedisKeyPrefix, *parts: str) -> str:
     Builds a namespaced Redis key, e.g.:
         build_redis_key(RedisKeyPrefix.CACHE, "dashboard", "kpis")
         -> "cache:dashboard:kpis"
-
-    Centralizing this avoids inconsistent key formats (colon vs
-    dash vs no separator) across different services.
     """
     return ":".join([prefix.value, *parts])
 
 
 # ── Cache TTL tiers (seconds) ─────────────────────────────────
-# Different endpoints have different volatility. Rather than one
-# flat TTL for everything, group them into tiers so it's a single
-# obvious knob to turn per-endpoint.
 
 class CacheTTL:
-    SHORT = 30        # e.g. dropoff explorer (user picks steps dynamically)
-    MEDIUM = 60        # e.g. KPIs, funnel, revenue — default tier
-    LONG = 300          # e.g. retention curve, cohort comparison — changes slowly
+    SHORT = 30
+    MEDIUM = 60
+    LONG = 300
 
 
 # ── Pagination defaults ───────────────────────────────────────
