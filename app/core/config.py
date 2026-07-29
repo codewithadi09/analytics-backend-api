@@ -79,4 +79,4 @@ def get_settings() -> Settings:
     at import time) makes this trivially mockable in tests via
     get_settings.cache_clear() + dependency override.
     """
-    return Settings()
+    return Settings()   

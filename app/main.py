@@ -33,6 +33,7 @@ from app.api.navigation import router as navigation_router
 from app.api.journey import router as journey_router
 from app.api.engagement import router as engagement_router
 from app.api.conversion import router as conversion_router
+from app.api.form_dropoff import router as form_dropoff_router
 
 if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
@@ -141,3 +142,4 @@ app.include_router(navigation_router)
 app.include_router(journey_router)
 app.include_router(engagement_router)
 app.include_router(conversion_router)
+app.include_router(form_dropoff_router)
