@@ -30,6 +30,7 @@ from app.database.connection import check_database_connection, close_pool
 from app.api.traffic import router as traffic_router
 from app.api.interactions import router as interactions_router
 from app.api.navigation import router as navigation_router
+from app.api.journey import router as journey_router
 
 if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
@@ -135,3 +136,4 @@ app.include_router(filters_router)
 app.include_router(traffic_router)
 app.include_router(interactions_router)
 app.include_router(navigation_router)
+app.include_router(journey_router)
