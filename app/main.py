@@ -5,7 +5,8 @@ Wires together routers, middleware, and startup/shutdown lifecycle.
 Feature routers (dashboard, funnel, retention, etc.) get added here
 as each vertical slice is built in later phases.
 """
-
+import sys
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 
@@ -17,15 +18,19 @@ from app.utils.request_logging import RequestLoggingMiddleware
 from app.utils.security_headers import SecurityHeadersMiddleware
 
 from app.api.auth import router as auth_router
-from app.api.dashboard import router as dashboard_router
-from app.api.funnel import router as funnel_router
-from app.api.retention import router as retention_router
-from app.api.user_journey import router as user_journey_router
-from app.api.users import router as users_router
+#from app.api.dashboard import router as dashboard_router
+#from app.api.funnel import router as funnel_router
+#from app.api.retention import router as retention_router
+#from app.api.user_journey import router as user_journey_router
+#from app.api.users import router as users_router
 from app.api.filters import router as filters_router
 from app.core.config import get_settings
 from app.core.redis_client import check_redis_connection, close_redis
 from app.database.connection import check_database_connection, close_pool
+from app.api.traffic import router as traffic_router
+
+if sys.platform == "win32":
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 logging.basicConfig(
     level=logging.INFO,
@@ -119,9 +124,10 @@ async def health_check() -> dict:
 
 
 app.include_router(auth_router)
-app.include_router(dashboard_router)
-app.include_router(funnel_router)
-app.include_router(retention_router)
-app.include_router(users_router)
-app.include_router(user_journey_router)
+#app.include_router(dashboard_router)
+#app.include_router(funnel_router)
+#app.include_router(retention_router)
+#app.include_router(users_router)
+#app.include_router(user_journey_router)
 app.include_router(filters_router)
+app.include_router(traffic_router)
