@@ -8,7 +8,15 @@ to actually acquire a connection before then gets a clear
 DatabaseNotConfiguredError instead of a confusing connection
 failure or a silent crash at import time.
 """
+import asyncio
+import sys
 
+if sys.platform == "win32":
+    # psycopg's async mode requires SelectorEventLoop; Windows defaults
+    # to ProactorEventLoop, which is incompatible. This must be set
+    # before any event loop is created.
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+    
 import logging
 from contextlib import asynccontextmanager
 from typing import AsyncIterator
