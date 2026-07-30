@@ -19,9 +19,9 @@ class LoginResponse(BaseModel):
     """Body returned by POST /login on success."""
 
     access_token: str
+    refresh_token: str
     token_type: str = "bearer"
     expires_in_minutes: int
-
 
 class CurrentUser(BaseModel):
     """
@@ -87,3 +87,21 @@ class ResetPasswordResponse(BaseModel):
     """Body returned by POST /auth/reset-password on success."""
 
     message: str
+
+class RefreshRequest(BaseModel):
+    """Body of POST /auth/refresh."""
+
+    refresh_token: str = Field(..., min_length=1, max_length=512)
+
+
+class RefreshResponse(BaseModel):
+    """
+    Body returned by POST /auth/refresh -- a new access token AND a
+    new refresh token (rotation: the old refresh token is invalidated
+    the moment this one is issued).
+    """
+
+    access_token: str
+    refresh_token: str
+    token_type: str = "bearer"
+    expires_in_minutes: int

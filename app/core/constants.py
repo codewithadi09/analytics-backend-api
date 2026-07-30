@@ -90,6 +90,8 @@ class RedisKeyPrefix(str, Enum):
     JWT_BLACKLIST = "jwt:blacklist"
     EMAIL_VERIFICATION = "email:verify"
     PASSWORD_RESET = "password:reset"
+    REFRESH_TOKEN = "refresh:token"       # ADD -- opaque token -> user_id
+    REFRESH_TOKEN_BY_USER = "refresh:user"  # ADD -- user_id -> their current active token
 
 
 def build_redis_key(prefix: RedisKeyPrefix, *parts: str) -> str:
@@ -110,6 +112,7 @@ class CacheTTL:
     
 EMAIL_VERIFICATION_TTL_SECONDS = 60 * 60 * 24  # 24 hours
 PASSWORD_RESET_TTL_SECONDS = 60 * 30  # 30 minutes -- shorter than email verification, higher-risk token
+REFRESH_TOKEN_TTL_SECONDS = 60 * 60 * 24 * 30  # 30 days
 
 # ── Pagination defaults ───────────────────────────────────────
 

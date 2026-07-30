@@ -19,6 +19,8 @@ from app.schemas.auth import (
     ForgotPasswordResponse,
     LoginRequest,
     LoginResponse,
+    RefreshRequest,
+    RefreshResponse,
     ResetPasswordRequest,
     ResetPasswordResponse,
     SignupRequest,
@@ -30,11 +32,13 @@ from app.services.auth_service import (
     EmailAlreadyRegisteredError,
     InactiveUserError,
     InvalidCredentialsError,
+    InvalidRefreshTokenError,
     InvalidResetTokenError,
     InvalidVerificationTokenError,
     UnverifiedEmailError,
     forgot_password,
     login,
+    refresh,
     reset_password,
     signup,
     verify_email,
@@ -53,6 +57,11 @@ _UNVERIFIED_ERROR = {
     "code": "EMAIL_NOT_VERIFIED",
 }
 
+_INVALID_REFRESH_ERROR = {
+    "message": "Invalid or expired refresh token",
+    "code": "INVALID_REFRESH_TOKEN",
+}
+
 
 async def _enforce_rate_limit(action: str, client_ip: str, limit_per_minute: int) -> None:
     redis = await get_redis()
@@ -66,10 +75,7 @@ async def _enforce_rate_limit(action: str, client_ip: str, limit_per_minute: int
         logger.warning("Rate limit exceeded for action=%s ip=%s", action, client_ip)
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail={
-                "message": "Too many attempts. Try again shortly.",
-                "code": "RATE_LIMITED",
-            },
+            detail={"message": "Too many attempts. Try again shortly.", "code": "RATE_LIMITED"},
         )
 
 
@@ -85,6 +91,18 @@ async def login_route(payload: LoginRequest, request: Request) -> LoginResponse:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=_UNVERIFIED_ERROR)
     except (InvalidCredentialsError, InactiveUserError):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=_GENERIC_AUTH_ERROR)
+
+
+@router.post("/refresh", response_model=RefreshResponse)
+async def refresh_route(payload: RefreshRequest, request: Request) -> RefreshResponse:
+    settings = get_settings()
+    client_ip = request.client.host if request.client else "unknown"
+    await _enforce_rate_limit("refresh", client_ip, settings.LOGIN_RATE_LIMIT_PER_MINUTE)
+
+    try:
+        return await refresh(payload.refresh_token)
+    except InvalidRefreshTokenError:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=_INVALID_REFRESH_ERROR)
 
 
 @router.post("/signup", response_model=SignupResponse, status_code=status.HTTP_201_CREATED)
@@ -130,9 +148,6 @@ async def forgot_password_route(
     settings = get_settings()
     client_ip = request.client.host if request.client else "unknown"
     await _enforce_rate_limit("forgot-password", client_ip, settings.LOGIN_RATE_LIMIT_PER_MINUTE)
-
-    # No try/except needed here -- forgot_password() never raises for
-    # a bad/unknown email by design; that's the whole anti-enumeration point.
     return await forgot_password(payload.email)
 
 
