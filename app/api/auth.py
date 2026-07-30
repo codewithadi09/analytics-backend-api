@@ -1,5 +1,5 @@
 """
-Authentication routes -- the one public endpoint in the API.
+Authentication routes -- the public endpoints in the API.
 
 Everything else in the application requires a valid bearer token
 (see app/auth/dependencies.py). Rate limiting here is Redis-backed
@@ -14,11 +14,23 @@ from fastapi import APIRouter, HTTPException, Request, status
 from app.core.config import get_settings
 from app.core.constants import RedisKeyPrefix, build_redis_key
 from app.core.redis_client import get_redis
-from app.schemas.auth import LoginRequest, LoginResponse
+from app.schemas.auth import (
+    LoginRequest,
+    LoginResponse,
+    SignupRequest,
+    SignupResponse,
+    VerifyEmailRequest,
+    VerifyEmailResponse,
+)
 from app.services.auth_service import (
+    EmailAlreadyRegisteredError,
     InactiveUserError,
     InvalidCredentialsError,
+    InvalidVerificationTokenError,
+    UnverifiedEmailError,
     login,
+    signup,
+    verify_email,
 )
 
 logger = logging.getLogger(__name__)
@@ -29,29 +41,26 @@ _GENERIC_AUTH_ERROR = {
     "code": "INVALID_CREDENTIALS",
 }
 
+_UNVERIFIED_ERROR = {
+    "message": "Please verify your email before logging in",
+    "code": "EMAIL_NOT_VERIFIED",
+}
 
-async def _enforce_login_rate_limit(client_ip: str) -> None:
-    """
-    Fixed-window rate limit keyed by client IP: N attempts per
-    60-second window. Simple and effective against brute-force;
-    not trying to be a full sliding-window/token-bucket here --
-    that's a Phase 11 hardening concern if it proves necessary.
-    """
-    settings = get_settings()
+
+async def _enforce_rate_limit(action: str, client_ip: str, limit_per_minute: int) -> None:
     redis = await get_redis()
-    key = build_redis_key(RedisKeyPrefix.RATE_LIMIT, "login", client_ip)
+    key = build_redis_key(RedisKeyPrefix.RATE_LIMIT, action, client_ip)
 
     current = await redis.incr(key)
     if current == 1:
-        # First request in this window -- set the window to expire in 60s.
         await redis.expire(key, 60)
 
-    if current > settings.LOGIN_RATE_LIMIT_PER_MINUTE:
-        logger.warning("Login rate limit exceeded for ip=%s", client_ip)
+    if current > limit_per_minute:
+        logger.warning("Rate limit exceeded for action=%s ip=%s", action, client_ip)
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail={
-                "message": "Too many login attempts. Try again shortly.",
+                "message": "Too many attempts. Try again shortly.",
                 "code": "RATE_LIMITED",
             },
         )
@@ -59,14 +68,55 @@ async def _enforce_login_rate_limit(client_ip: str) -> None:
 
 @router.post("/login", response_model=LoginResponse)
 async def login_route(payload: LoginRequest, request: Request) -> LoginResponse:
+    settings = get_settings()
     client_ip = request.client.host if request.client else "unknown"
-    await _enforce_login_rate_limit(client_ip)
+    await _enforce_rate_limit("login", client_ip, settings.LOGIN_RATE_LIMIT_PER_MINUTE)
 
     try:
         return await login(payload.email, payload.password)
+    except UnverifiedEmailError:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=_UNVERIFIED_ERROR,
+        )
     except (InvalidCredentialsError, InactiveUserError):
-        # Same status/body for both -- don't leak which failure mode occurred.
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=_GENERIC_AUTH_ERROR,
+        )
+
+
+@router.post("/signup", response_model=SignupResponse, status_code=status.HTTP_201_CREATED)
+async def signup_route(payload: SignupRequest, request: Request) -> SignupResponse:
+    settings = get_settings()
+    client_ip = request.client.host if request.client else "unknown"
+    await _enforce_rate_limit("signup", client_ip, settings.LOGIN_RATE_LIMIT_PER_MINUTE)
+
+    try:
+        return await signup(payload.email, payload.password)
+    except EmailAlreadyRegisteredError:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "message": "An account with this email already exists",
+                "code": "EMAIL_ALREADY_REGISTERED",
+            },
+        )
+
+
+@router.post("/verify-email", response_model=VerifyEmailResponse)
+async def verify_email_route(payload: VerifyEmailRequest, request: Request) -> VerifyEmailResponse:
+    settings = get_settings()
+    client_ip = request.client.host if request.client else "unknown"
+    await _enforce_rate_limit("verify-email", client_ip, settings.LOGIN_RATE_LIMIT_PER_MINUTE)
+
+    try:
+        return await verify_email(payload.token)
+    except InvalidVerificationTokenError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "message": "Invalid or expired verification link",
+                "code": "INVALID_VERIFICATION_TOKEN",
+            },
         )

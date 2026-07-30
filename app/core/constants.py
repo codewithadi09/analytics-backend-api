@@ -87,6 +87,7 @@ class RedisKeyPrefix(str, Enum):
     CACHE = "cache"
     RATE_LIMIT = "ratelimit"
     JWT_BLACKLIST = "jwt:blacklist"
+    EMAIL_VERIFICATION = "email:verify"
 
 
 def build_redis_key(prefix: RedisKeyPrefix, *parts: str) -> str:
@@ -104,7 +105,8 @@ class CacheTTL:
     SHORT = 30
     MEDIUM = 60
     LONG = 300
-
+    
+EMAIL_VERIFICATION_TTL_SECONDS = 60 * 60 * 24  # 24 hours
 
 # ── Pagination defaults ───────────────────────────────────────
 

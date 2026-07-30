@@ -34,3 +34,28 @@ class CurrentUser(BaseModel):
 
     email: EmailStr
     user_id: str
+
+class SignupRequest(BaseModel):
+    """Body of POST /auth/signup."""
+
+    email: EmailStr
+    password: str = Field(..., min_length=8, max_length=128)
+
+
+class SignupResponse(BaseModel):
+    """Body returned by POST /auth/signup -- no token yet, account needs verification first."""
+
+    message: str
+    email: EmailStr
+
+class VerifyEmailRequest(BaseModel):
+    """Body of POST /auth/verify-email."""
+
+    token: str = Field(..., min_length=1, max_length=256)
+
+
+class VerifyEmailResponse(BaseModel):
+    """Body returned by POST /auth/verify-email on success."""
+
+    message: str
+    email: EmailStr
