@@ -55,6 +55,7 @@ class EventName(str, Enum):
     FORM_FIELD_ERROR = "form_field_error"
     FORM_SUBMIT = "form_submit"
     FORM_SUBMIT_SUCCESS = "form_submit_success"
+    
 
 
 # ── Real conversion funnel steps ─────────────────────────────
@@ -88,6 +89,7 @@ class RedisKeyPrefix(str, Enum):
     RATE_LIMIT = "ratelimit"
     JWT_BLACKLIST = "jwt:blacklist"
     EMAIL_VERIFICATION = "email:verify"
+    PASSWORD_RESET = "password:reset"
 
 
 def build_redis_key(prefix: RedisKeyPrefix, *parts: str) -> str:
@@ -107,6 +109,7 @@ class CacheTTL:
     LONG = 300
     
 EMAIL_VERIFICATION_TTL_SECONDS = 60 * 60 * 24  # 24 hours
+PASSWORD_RESET_TTL_SECONDS = 60 * 30  # 30 minutes -- shorter than email verification, higher-risk token
 
 # ── Pagination defaults ───────────────────────────────────────
 

@@ -59,3 +59,31 @@ class VerifyEmailResponse(BaseModel):
 
     message: str
     email: EmailStr
+
+class ForgotPasswordRequest(BaseModel):
+    """Body of POST /auth/forgot-password."""
+
+    email: EmailStr
+
+
+class ForgotPasswordResponse(BaseModel):
+    """
+    Body returned by POST /auth/forgot-password -- ALWAYS this same
+    generic message, whether or not the email is actually registered.
+    Prevents using this endpoint to enumerate valid accounts.
+    """
+
+    message: str
+
+
+class ResetPasswordRequest(BaseModel):
+    """Body of POST /auth/reset-password."""
+
+    token: str = Field(..., min_length=1, max_length=256)
+    new_password: str = Field(..., min_length=8, max_length=128)
+
+
+class ResetPasswordResponse(BaseModel):
+    """Body returned by POST /auth/reset-password on success."""
+
+    message: str

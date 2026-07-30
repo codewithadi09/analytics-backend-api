@@ -14,6 +14,7 @@ from app.auth.jwt import issue_access_token
 from app.core.config import get_settings
 from app.core.constants import (
     EMAIL_VERIFICATION_TTL_SECONDS,
+    PASSWORD_RESET_TTL_SECONDS,
     RedisKeyPrefix,
     build_redis_key,
 )
@@ -24,8 +25,15 @@ from app.repositories.auth_repository import (
     email_exists,
     get_user_by_email,
     mark_user_verified,
+    update_user_password,
 )
-from app.schemas.auth import LoginResponse, SignupResponse, VerifyEmailResponse
+from app.schemas.auth import (
+    ForgotPasswordResponse,
+    LoginResponse,
+    ResetPasswordResponse,
+    SignupResponse,
+    VerifyEmailResponse,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +60,10 @@ class EmailAlreadyRegisteredError(Exception):
 
 class InvalidVerificationTokenError(Exception):
     """Raised when a verification token is missing, expired, or already used."""
+
+
+class InvalidResetTokenError(Exception):
+    """Raised when a password reset token is missing, expired, or already used."""
 
 
 async def login(email: str, password: str) -> LoginResponse:
@@ -87,9 +99,7 @@ async def login(email: str, password: str) -> LoginResponse:
 
 
 async def _send_verification_email(email: str, token: str) -> None:
-    """
-    Placeholder for real email delivery -- see signup step's note.
-    """
+    """Placeholder for real email delivery -- prints a dev link instead."""
     verification_link = f"http://localhost:3000/verify-email?token={token}"
     logger.info("Verification link for %s: %s", email, verification_link)
     print(f"\n[DEV] Verification link for {email}:\n{verification_link}\n")
@@ -134,10 +144,66 @@ async def verify_email(token: str) -> VerifyEmailResponse:
         raise InvalidVerificationTokenError("Invalid or expired verification link")
 
     await mark_user_verified(email)
-    await redis.delete(key)  # one-time use -- can't be replayed
+    await redis.delete(key)
 
     logger.info("Email verified: %s", email)
     return VerifyEmailResponse(
         message="Email verified successfully. You can now log in.",
         email=email,
+    )
+
+
+async def _send_password_reset_email(email: str, token: str) -> None:
+    """Placeholder for real email delivery -- prints a dev link instead."""
+    reset_link = f"http://localhost:3000/reset-password?token={token}"
+    logger.info("Password reset link for %s: %s", email, reset_link)
+    print(f"\n[DEV] Password reset link for {email}:\n{reset_link}\n")
+
+
+async def forgot_password(email: str) -> ForgotPasswordResponse:
+    """
+    ALWAYS returns the same generic response, regardless of whether
+    the email is registered -- prevents this endpoint being used to
+    enumerate valid accounts, same principle as login()'s dummy
+    bcrypt verify against unknown emails.
+    """
+    normalized_email = email.lower().strip()
+    user = await get_user_by_email(normalized_email)
+
+    if user is not None:
+        token = secrets.token_urlsafe(32)
+        redis = await get_redis()
+        key = build_redis_key(RedisKeyPrefix.PASSWORD_RESET, token)
+        await redis.set(key, user.email, ex=PASSWORD_RESET_TTL_SECONDS)
+        await _send_password_reset_email(user.email, token)
+        logger.info("Password reset requested for user_id=%s", user.user_id)
+    else:
+        logger.info("Password reset requested for unknown email")
+
+    return ForgotPasswordResponse(
+        message="If an account exists for this email, a password reset link has been sent."
+    )
+
+
+async def reset_password(token: str, new_password: str) -> ResetPasswordResponse:
+    """
+    Consumes a password reset token: looks it up in Redis, updates
+    the matching account's password, and deletes the token so it
+    can't be reused. Raises InvalidResetTokenError for a missing,
+    expired, or already-used token -- maps to 400 in the route.
+    """
+    redis = await get_redis()
+    key = build_redis_key(RedisKeyPrefix.PASSWORD_RESET, token)
+
+    email = await redis.get(key)
+    if email is None:
+        logger.info("Invalid or expired password reset token presented")
+        raise InvalidResetTokenError("Invalid or expired password reset link")
+
+    await update_user_password(email, new_password)
+    await redis.delete(key)
+
+    logger.info("Password reset completed: %s", email)
+    return ResetPasswordResponse(
+        message="Password reset successfully. You can now log in with your new password."
     )

@@ -15,8 +15,12 @@ from app.core.config import get_settings
 from app.core.constants import RedisKeyPrefix, build_redis_key
 from app.core.redis_client import get_redis
 from app.schemas.auth import (
+    ForgotPasswordRequest,
+    ForgotPasswordResponse,
     LoginRequest,
     LoginResponse,
+    ResetPasswordRequest,
+    ResetPasswordResponse,
     SignupRequest,
     SignupResponse,
     VerifyEmailRequest,
@@ -26,9 +30,12 @@ from app.services.auth_service import (
     EmailAlreadyRegisteredError,
     InactiveUserError,
     InvalidCredentialsError,
+    InvalidResetTokenError,
     InvalidVerificationTokenError,
     UnverifiedEmailError,
+    forgot_password,
     login,
+    reset_password,
     signup,
     verify_email,
 )
@@ -75,15 +82,9 @@ async def login_route(payload: LoginRequest, request: Request) -> LoginResponse:
     try:
         return await login(payload.email, payload.password)
     except UnverifiedEmailError:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=_UNVERIFIED_ERROR,
-        )
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=_UNVERIFIED_ERROR)
     except (InvalidCredentialsError, InactiveUserError):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=_GENERIC_AUTH_ERROR,
-        )
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=_GENERIC_AUTH_ERROR)
 
 
 @router.post("/signup", response_model=SignupResponse, status_code=status.HTTP_201_CREATED)
@@ -118,5 +119,38 @@ async def verify_email_route(payload: VerifyEmailRequest, request: Request) -> V
             detail={
                 "message": "Invalid or expired verification link",
                 "code": "INVALID_VERIFICATION_TOKEN",
+            },
+        )
+
+
+@router.post("/forgot-password", response_model=ForgotPasswordResponse)
+async def forgot_password_route(
+    payload: ForgotPasswordRequest, request: Request
+) -> ForgotPasswordResponse:
+    settings = get_settings()
+    client_ip = request.client.host if request.client else "unknown"
+    await _enforce_rate_limit("forgot-password", client_ip, settings.LOGIN_RATE_LIMIT_PER_MINUTE)
+
+    # No try/except needed here -- forgot_password() never raises for
+    # a bad/unknown email by design; that's the whole anti-enumeration point.
+    return await forgot_password(payload.email)
+
+
+@router.post("/reset-password", response_model=ResetPasswordResponse)
+async def reset_password_route(
+    payload: ResetPasswordRequest, request: Request
+) -> ResetPasswordResponse:
+    settings = get_settings()
+    client_ip = request.client.host if request.client else "unknown"
+    await _enforce_rate_limit("reset-password", client_ip, settings.LOGIN_RATE_LIMIT_PER_MINUTE)
+
+    try:
+        return await reset_password(payload.token, payload.new_password)
+    except InvalidResetTokenError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "message": "Invalid or expired password reset link",
+                "code": "INVALID_RESET_TOKEN",
             },
         )

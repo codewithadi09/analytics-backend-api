@@ -98,3 +98,18 @@ async def get_user_by_id(user_id: str) -> UserRecord | None:
         if user.user_id == user_id:
             return user
     return None
+
+async def update_user_password(email: str, new_plain_password: str) -> None:
+    """
+    Replaces a user's hashed_password. Silently no-ops if the email
+    doesn't exist -- callers (reset_password in the service layer)
+    only call this after already confirming a valid reset token
+    resolved to a real, known email, so this should never actually
+    hit the no-op path in practice.
+    """
+    normalized_email = email.lower()
+    existing = _MOCK_USERS.get(normalized_email)
+    if existing is not None:
+        _MOCK_USERS[normalized_email] = replace(
+            existing, hashed_password=hash_password(new_plain_password)
+        )
