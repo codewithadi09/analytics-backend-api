@@ -7,3 +7,4 @@ text
 sanity_check.py
 postman/
 .postman/
+app_data.db

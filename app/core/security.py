@@ -68,12 +68,21 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
 class TokenPayload:
     """Lightweight container for a decoded token's claims we care about."""
 
-    def __init__(self, sub: str, jti: str, exp: int, token_type: str) -> None:
-        self.sub = sub            # subject -- user identifier (e.g. email or user id)
-        self.jti = jti             # unique token id -- used for blacklisting on logout
-        self.exp = exp             # expiry (unix timestamp)
+    def __init__(
+        self,
+        sub: str,
+        jti: str,
+        exp: int,
+        token_type: str,
+        user_id: int | None = None,
+        is_superadmin: bool = False,
+    ) -> None:
+        self.sub = sub                    # subject -- username
+        self.jti = jti                     # unique token id -- used for blacklisting on logout
+        self.exp = exp                     # expiry (unix timestamp)
         self.token_type = token_type
-
+        self.user_id = user_id             # SQLite users.id -- None means a malformed/legacy token
+        self.is_superadmin = is_superadmin # drives require_admin -- see auth/dependencies.py
 
 def create_access_token(subject: str, extra_claims: dict[str, Any] | None = None) -> tuple[str, str]:
     """
@@ -125,4 +134,6 @@ def decode_access_token(token: str) -> TokenPayload:
         jti=payload["jti"],
         exp=payload["exp"],
         token_type=payload["type"],
+        user_id=payload.get("user_id"),
+        is_superadmin=payload.get("is_superadmin", False),
     )

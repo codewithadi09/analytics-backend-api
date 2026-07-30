@@ -35,6 +35,7 @@ from app.api.engagement import router as engagement_router
 from app.api.conversion import router as conversion_router
 from app.api.form_dropoff import router as form_dropoff_router
 from app.api.dropoff_explorer import router as dropoff_explorer_router
+from app.api.admin import router as admin_router
 
 if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
@@ -57,6 +58,9 @@ async def lifespan(app: FastAPI):
         logger.error("Startup check failed: Redis is not reachable at %s", settings.REDIS_URL)
     else:
         logger.info("Startup checks passed (environment=%s)", settings.ENVIRONMENT)
+
+    from app.repositories.user_repository import seed_superadmin_if_missing
+    await seed_superadmin_if_missing(settings.SUPERADMIN_USERNAME, settings.SUPERADMIN_PASSWORD)
 
     yield
 
@@ -145,3 +149,4 @@ app.include_router(engagement_router)
 app.include_router(conversion_router)
 app.include_router(form_dropoff_router)
 app.include_router(dropoff_explorer_router)
+app.include_router(admin_router)

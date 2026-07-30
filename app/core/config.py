@@ -52,6 +52,16 @@ class Settings(BaseSettings):
     # -- Rate limiting (Redis-backed) --------------------------------------------------
     LOGIN_RATE_LIMIT_PER_MINUTE: int = 5
 
+    # -- App database (SQLite -- user accounts, separate from Postgres/rudder_schema) ----
+    SQLITE_DB_PATH: str = "app_data.db"
+
+    # -- Bootstrap superadmin --------------------------------------------------
+    # No defaults -- the app must refuse to start rather than silently
+    # boot with a guessable superadmin account, same principle as
+    # JWT_SECRET_KEY above.
+    SUPERADMIN_USERNAME: str = Field(..., min_length=3, max_length=50)
+    SUPERADMIN_PASSWORD: str = Field(..., min_length=8, max_length=128)
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
@@ -59,7 +69,7 @@ class Settings(BaseSettings):
         extra="forbid",  # unknown env vars fail loudly instead of being silently ignored
     )
 
-    @field_validator("JWT_SECRET_KEY")
+    @field_validator("JWT_SECRET_KEY", "SUPERADMIN_PASSWORD")
     @classmethod
     def _reject_weak_secret(cls, v: str) -> str:
         if v.lower() in _PLACEHOLDER_SECRETS:

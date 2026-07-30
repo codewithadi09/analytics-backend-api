@@ -22,13 +22,20 @@ class TokenRevokedError(Exception):
     """Raised when a token is structurally valid but has been revoked (logged out)."""
 
 
-async def issue_access_token(subject: str) -> tuple[str, str]:
+async def issue_access_token(username: str, user_id: int, is_superadmin: bool) -> tuple[str, str]:
     """
-    Issues a new access token for the given subject (typically the
-    user's email or user id). Returns (token, jti).
+    Issues a new access token. user_id and is_superadmin are embedded
+    as extra JWT claims so every protected route can know the
+    caller's identity and admin status WITHOUT a database lookup on
+    every request -- consistent with this app's existing stateless-JWT
+    design (get_current_user has never touched a database, only Redis
+    for revocation checks). A permission change takes effect within
+    the token's 30-minute lifetime, not instantly -- an accepted
+    tradeoff for keeping every protected request fast.
     """
-    return create_access_token(subject)
-
+    return create_access_token(
+        username, extra_claims={"user_id": user_id, "is_superadmin": is_superadmin}
+    )
 
 async def verify_access_token(token: str) -> TokenPayload:
     """

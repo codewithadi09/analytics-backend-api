@@ -1,10 +1,12 @@
 """
 Auth business logic.
 
-This layer orchestrates the repository (data lookup) and core
-security/jwt primitives (verification, token issuance). Routes
-(app/api/auth.py) should never talk to the repository or
-core.security directly -- always go through here.
+Username-based login against the real SQLite user store (see
+app/repositories/user_repository.py) -- no more email, no signup, no
+verification. Refresh token rotation and password-reset-invalidation
+carry forward unchanged from the previous design; only identity
+resolution (username vs email) and the user store (SQLite vs
+in-memory dict) actually changed.
 """
 
 import logging
@@ -12,31 +14,15 @@ import secrets
 
 from app.auth.jwt import issue_access_token
 from app.core.config import get_settings
-from app.core.constants import (
-    EMAIL_VERIFICATION_TTL_SECONDS,
-    PASSWORD_RESET_TTL_SECONDS,
-    REFRESH_TOKEN_TTL_SECONDS,
-    RedisKeyPrefix,
-    build_redis_key,
-)
+from app.core.constants import REFRESH_TOKEN_TTL_SECONDS, RedisKeyPrefix, build_redis_key
 from app.core.redis_client import get_redis
 from app.core.security import verify_password
-from app.repositories.auth_repository import (
-    create_user,
-    email_exists,
-    get_user_by_email,
+from app.repositories.user_repository import (
     get_user_by_id,
-    mark_user_verified,
+    get_user_by_username,
     update_user_password,
 )
-from app.schemas.auth import (
-    ForgotPasswordResponse,
-    LoginResponse,
-    RefreshResponse,
-    ResetPasswordResponse,
-    SignupResponse,
-    VerifyEmailResponse,
-)
+from app.schemas.auth import ChangePasswordResponse, LoginResponse, RefreshResponse
 
 logger = logging.getLogger(__name__)
 
@@ -46,46 +32,27 @@ _DUMMY_HASH = (
 
 
 class InvalidCredentialsError(Exception):
-    """Raised when email/password don't match -- maps to 401 in the route."""
+    """Raised when username/password don't match -- maps to 401 in the route."""
 
 
 class InactiveUserError(Exception):
     """Raised when credentials are correct but the account is disabled."""
 
 
-class UnverifiedEmailError(Exception):
-    """Raised when credentials are correct but the email hasn't been verified yet."""
-
-
-class EmailAlreadyRegisteredError(Exception):
-    """Raised on signup if the email is already taken -- maps to 409 in the route."""
-
-
-class InvalidVerificationTokenError(Exception):
-    """Raised when a verification token is missing, expired, or already used."""
-
-
-class InvalidResetTokenError(Exception):
-    """Raised when a password reset token is missing, expired, or already used."""
-
-
 class InvalidRefreshTokenError(Exception):
     """Raised when a refresh token is missing, expired, already rotated out, or revoked."""
 
 
-# ---------------------------------------------------------------------
-# Refresh token helpers -- one active refresh token per user. Issuing
-# a new one (login, or rotation on /refresh) always invalidates
-# whatever token existed before, via the user->token index below.
-# ---------------------------------------------------------------------
+class IncorrectCurrentPasswordError(Exception):
+    """Raised when a change-password request's current_password doesn't match."""
 
-async def _issue_refresh_token(user_id: str) -> str:
+
+async def _issue_refresh_token(user_id: int) -> str:
+    """One active refresh token per user -- issuing a new one always
+    invalidates whatever existed before, via the user->token index."""
     redis = await get_redis()
-    user_index_key = build_redis_key(RedisKeyPrefix.REFRESH_TOKEN_BY_USER, user_id)
+    user_index_key = build_redis_key(RedisKeyPrefix.REFRESH_TOKEN_BY_USER, str(user_id))
 
-    # Revoke any existing refresh token for this user first -- one
-    # active session at a time, matches the simplicity the project
-    # needs right now (no multi-device session list to manage).
     old_token = await redis.get(user_index_key)
     if old_token is not None:
         await redis.delete(build_redis_key(RedisKeyPrefix.REFRESH_TOKEN, old_token))
@@ -93,20 +60,16 @@ async def _issue_refresh_token(user_id: str) -> str:
     new_token = secrets.token_urlsafe(32)
     token_key = build_redis_key(RedisKeyPrefix.REFRESH_TOKEN, new_token)
 
-    await redis.set(token_key, user_id, ex=REFRESH_TOKEN_TTL_SECONDS)
+    await redis.set(token_key, str(user_id), ex=REFRESH_TOKEN_TTL_SECONDS)
     await redis.set(user_index_key, new_token, ex=REFRESH_TOKEN_TTL_SECONDS)
 
     return new_token
 
 
-async def _revoke_refresh_token_for_user(user_id: str) -> None:
-    """
-    Kills a user's current refresh token immediately -- used on
-    password reset, so a stolen refresh token stops working the
-    instant the password changes, not just at its natural expiry.
-    """
+async def _revoke_refresh_token_for_user(user_id: int) -> None:
+    """Kills a user's current refresh token immediately -- used on password change."""
     redis = await get_redis()
-    user_index_key = build_redis_key(RedisKeyPrefix.REFRESH_TOKEN_BY_USER, user_id)
+    user_index_key = build_redis_key(RedisKeyPrefix.REFRESH_TOKEN_BY_USER, str(user_id))
 
     token = await redis.get(user_index_key)
     if token is not None:
@@ -114,32 +77,28 @@ async def _revoke_refresh_token_for_user(user_id: str) -> None:
         await redis.delete(user_index_key)
 
 
-async def login(email: str, password: str) -> LoginResponse:
-    normalized_email = email.lower().strip()
-    user = await get_user_by_email(normalized_email)
+async def login(username: str, password: str) -> LoginResponse:
+    normalized_username = username.lower().strip()
+    user = await get_user_by_username(normalized_username)
 
     if user is None:
-        verify_password(password, _DUMMY_HASH)
-        logger.info("Login attempt for unknown email")
-        raise InvalidCredentialsError("Invalid email or password")
+        verify_password(password, _DUMMY_HASH)  # timing-attack mitigation, same as before
+        logger.info("Login attempt for unknown username")
+        raise InvalidCredentialsError("Invalid username or password")
 
     if not verify_password(password, user.hashed_password):
-        logger.info("Login attempt with wrong password for user_id=%s", user.user_id)
-        raise InvalidCredentialsError("Invalid email or password")
+        logger.info("Login attempt with wrong password for user_id=%s", user.id)
+        raise InvalidCredentialsError("Invalid username or password")
 
     if not user.is_active:
-        logger.info("Login attempt for inactive user_id=%s", user.user_id)
+        logger.info("Login attempt for inactive user_id=%s", user.id)
         raise InactiveUserError("Account is disabled")
 
-    if not user.is_verified:
-        logger.info("Login attempt for unverified user_id=%s", user.user_id)
-        raise UnverifiedEmailError("Email not verified")
-
-    access_token, _jti = await issue_access_token(user.email)
-    refresh_token = await _issue_refresh_token(user.user_id)
+    access_token, _jti = await issue_access_token(user.username, user.id, user.is_superadmin)
+    refresh_token = await _issue_refresh_token(user.id)
     settings = get_settings()
 
-    logger.info("Successful login for user_id=%s", user.user_id)
+    logger.info("Successful login for user_id=%s", user.id)
     return LoginResponse(
         access_token=access_token,
         refresh_token=refresh_token,
@@ -149,30 +108,25 @@ async def login(email: str, password: str) -> LoginResponse:
 
 
 async def refresh(refresh_token: str) -> RefreshResponse:
-    """
-    Trades a valid refresh token for a fresh access token, WITHOUT
-    a password. Rotates the refresh token in the same call -- the
-    old one is destroyed and a new one issued, so a refresh token
-    can only ever be used once before being replaced.
-    """
+    """Trades a valid refresh token for a fresh access token, with rotation."""
     redis = await get_redis()
     token_key = build_redis_key(RedisKeyPrefix.REFRESH_TOKEN, refresh_token)
 
-    user_id = await redis.get(token_key)
-    if user_id is None:
+    user_id_str = await redis.get(token_key)
+    if user_id_str is None:
         logger.info("Invalid or expired refresh token presented")
         raise InvalidRefreshTokenError("Invalid or expired refresh token")
 
-    user = await get_user_by_id(user_id)
+    user = await get_user_by_id(int(user_id_str))
     if user is None or not user.is_active:
-        logger.info("Refresh attempt for inactive/missing user_id=%s", user_id)
+        logger.info("Refresh attempt for inactive/missing user_id=%s", user_id_str)
         raise InvalidRefreshTokenError("Invalid or expired refresh token")
 
-    new_access_token, _jti = await issue_access_token(user.email)
-    new_refresh_token = await _issue_refresh_token(user.user_id)
+    new_access_token, _jti = await issue_access_token(user.username, user.id, user.is_superadmin)
+    new_refresh_token = await _issue_refresh_token(user.id)
     settings = get_settings()
 
-    logger.info("Access token refreshed for user_id=%s", user.user_id)
+    logger.info("Access token refreshed for user_id=%s", user.id)
     return RefreshResponse(
         access_token=new_access_token,
         refresh_token=new_refresh_token,
@@ -181,99 +135,27 @@ async def refresh(refresh_token: str) -> RefreshResponse:
     )
 
 
-async def _send_verification_email(email: str, token: str) -> None:
-    verification_link = f"http://localhost:3000/verify-email?token={token}"
-    logger.info("Verification link for %s: %s", email, verification_link)
-    print(f"\n[DEV] Verification link for {email}:\n{verification_link}\n")
+async def change_own_password(
+    user_id: int, current_password: str, new_password: str
+) -> ChangePasswordResponse:
+    """
+    Any logged-in user changing their OWN password -- requires
+    confirming the current password first, since a valid access
+    token alone (e.g. an unlocked, unattended browser tab) shouldn't
+    be sufficient to take over the account permanently.
+    """
+    user = await get_user_by_id(user_id)
+    if user is None:
+        # Shouldn't happen -- a valid JWT implies the user existed at
+        # issuance time -- but never trust that blindly.
+        raise InvalidCredentialsError("User not found")
 
+    if not verify_password(current_password, user.hashed_password):
+        logger.info("Incorrect current_password on change-password for user_id=%s", user_id)
+        raise IncorrectCurrentPasswordError("Current password is incorrect")
 
-async def signup(email: str, password: str) -> SignupResponse:
-    normalized_email = email.lower().strip()
+    await update_user_password(user.username, new_password)
+    await _revoke_refresh_token_for_user(user_id)  # force re-login on other sessions
 
-    if await email_exists(normalized_email):
-        logger.info("Signup attempt for already-registered email")
-        raise EmailAlreadyRegisteredError("An account with this email already exists")
-
-    user = await create_user(normalized_email, password)
-
-    token = secrets.token_urlsafe(32)
-    redis = await get_redis()
-    key = build_redis_key(RedisKeyPrefix.EMAIL_VERIFICATION, token)
-    await redis.set(key, user.email, ex=EMAIL_VERIFICATION_TTL_SECONDS)
-
-    await _send_verification_email(user.email, token)
-
-    logger.info("New signup pending verification: user_id=%s", user.user_id)
-    return SignupResponse(
-        message="Account created. Check your email to verify your account.",
-        email=user.email,
-    )
-
-
-async def verify_email(token: str) -> VerifyEmailResponse:
-    redis = await get_redis()
-    key = build_redis_key(RedisKeyPrefix.EMAIL_VERIFICATION, token)
-
-    email = await redis.get(key)
-    if email is None:
-        logger.info("Invalid or expired verification token presented")
-        raise InvalidVerificationTokenError("Invalid or expired verification link")
-
-    await mark_user_verified(email)
-    await redis.delete(key)
-
-    logger.info("Email verified: %s", email)
-    return VerifyEmailResponse(
-        message="Email verified successfully. You can now log in.",
-        email=email,
-    )
-
-
-async def _send_password_reset_email(email: str, token: str) -> None:
-    reset_link = f"http://localhost:3000/reset-password?token={token}"
-    logger.info("Password reset link for %s: %s", email, reset_link)
-    print(f"\n[DEV] Password reset link for {email}:\n{reset_link}\n")
-
-
-async def forgot_password(email: str) -> ForgotPasswordResponse:
-    normalized_email = email.lower().strip()
-    user = await get_user_by_email(normalized_email)
-
-    if user is not None:
-        token = secrets.token_urlsafe(32)
-        redis = await get_redis()
-        key = build_redis_key(RedisKeyPrefix.PASSWORD_RESET, token)
-        await redis.set(key, user.email, ex=PASSWORD_RESET_TTL_SECONDS)
-        await _send_password_reset_email(user.email, token)
-        logger.info("Password reset requested for user_id=%s", user.user_id)
-    else:
-        logger.info("Password reset requested for unknown email")
-
-    return ForgotPasswordResponse(
-        message="If an account exists for this email, a password reset link has been sent."
-    )
-
-
-async def reset_password(token: str, new_password: str) -> ResetPasswordResponse:
-    redis = await get_redis()
-    key = build_redis_key(RedisKeyPrefix.PASSWORD_RESET, token)
-
-    email = await redis.get(key)
-    if email is None:
-        logger.info("Invalid or expired password reset token presented")
-        raise InvalidResetTokenError("Invalid or expired password reset link")
-
-    user = await get_user_by_email(email)
-    await update_user_password(email, new_password)
-
-    # Close the session-hijack gap: kill any existing refresh token
-    # for this user the moment their password changes.
-    if user is not None:
-        await _revoke_refresh_token_for_user(user.user_id)
-
-    await redis.delete(key)
-
-    logger.info("Password reset completed: %s", email)
-    return ResetPasswordResponse(
-        message="Password reset successfully. You can now log in with your new password."
-    )
+    logger.info("Password changed for user_id=%s", user_id)
+    return ChangePasswordResponse(message="Password changed successfully.")
