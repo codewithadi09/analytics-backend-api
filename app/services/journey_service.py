@@ -23,6 +23,12 @@ from app.repositories.journey_repository import (
     get_user_journey_events,
 )
 from app.schemas.journey import JourneyEvent, ResolvedIdentity, UserJourneyResponse
+from app.repositories.journey_repository import (
+    get_visitor_count as repo_get_visitor_count,
+    get_visitors_page as repo_get_visitors_page,
+)
+from app.schemas.common import PaginatedResponse, PaginationMeta
+from app.schemas.journey import VisitorSummary
 
 logger = logging.getLogger(__name__)
 
@@ -78,3 +84,22 @@ async def get_user_journey(
         has_converted=has_converted,
         events=events,
     )
+
+async def get_visitors_page(
+    search: str | None, page: int, page_size: int
+) -> PaginatedResponse[VisitorSummary]:
+    """Not cached -- parameterized by search+page, same reasoning as every other filtered list."""
+    offset = (page - 1) * page_size
+
+    rows = await repo_get_visitors_page(search, limit=page_size, offset=offset)
+    total = await repo_get_visitor_count(search)
+
+    items = [
+        VisitorSummary(
+            anonymous_id=r.anonymous_id, email=r.email, name=r.name,
+            first_seen=r.first_seen, last_seen=r.last_seen,
+        )
+        for r in rows
+    ]
+    meta = PaginationMeta.build(page=page, page_size=page_size, total_items=total)
+    return PaginatedResponse[VisitorSummary](items=items, meta=meta)

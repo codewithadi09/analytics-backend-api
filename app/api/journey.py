@@ -1,7 +1,12 @@
 """
-User Journey (cross-session) routes -- a single visitor's full
-chronological timeline across pages, all 16 click tables, and the
-form funnel, looked up by anonymous_id.
+User Journey (cross-session) routes.
+
+/visitors (a literal path) is registered BEFORE /{anonymous_id} (a
+parameterized path) deliberately -- FastAPI matches routes in
+registration order, so reversing this would make "/journey/visitors"
+get swallowed as if "visitors" were someone's anonymous_id. This is
+the exact route-ordering bug class flagged in this project's own
+handoff notes from Phase 8/9.
 """
 
 from typing import Literal
@@ -10,10 +15,25 @@ from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
 
 from app.auth.dependencies import require_rate_limit
 from app.schemas.auth import CurrentUser
-from app.schemas.journey import UserJourneyResponse
-from app.services.journey_service import UserNotFoundError, get_user_journey
+from app.schemas.common import PaginatedResponse
+from app.schemas.journey import UserJourneyResponse, VisitorSummary
+from app.services.journey_service import (
+    UserNotFoundError,
+    get_user_journey,
+    get_visitors_page,
+)
 
 router = APIRouter(prefix="/journey", tags=["journey"])
+
+
+@router.get("/visitors", response_model=PaginatedResponse[VisitorSummary])
+async def get_visitors_route(
+    search: str | None = Query(default=None, max_length=254),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=25, ge=1, le=100),
+    current_user: CurrentUser = Depends(require_rate_limit),
+) -> PaginatedResponse[VisitorSummary]:
+    return await get_visitors_page(search=search, page=page, page_size=page_size)
 
 
 @router.get("/{anonymous_id}", response_model=UserJourneyResponse)

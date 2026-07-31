@@ -45,3 +45,12 @@ class UserJourneyResponse(BaseModel):
     last_seen: str  # ISO 8601 string
     has_converted: bool
     events: list[JourneyEvent]
+
+class VisitorSummary(BaseModel):
+    """One row in the visitor selector list -- GET /journey/visitors."""
+
+    anonymous_id: str
+    email: EmailStr | None = None
+    name: str | None = None
+    first_seen: str  # ISO 8601 string
+    last_seen: str  # ISO 8601 string

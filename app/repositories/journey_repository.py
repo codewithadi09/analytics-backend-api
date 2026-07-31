@@ -144,3 +144,98 @@ async def get_resolved_identity(anonymous_id: str) -> ResolvedIdentityRow | None
             if row is None:
                 return None
             return ResolvedIdentityRow(email=row[0], name=row[1])
+
+@dataclass(frozen=True)
+class VisitorSummaryRow:
+    anonymous_id: str
+    email: str | None
+    name: str | None
+    first_seen: str
+    last_seen: str
+
+
+def _visitor_search_clause(search: str | None) -> tuple[str, tuple]:
+    """
+    Builds the optional WHERE clause for the search box on the
+    visitor selector -- matches anonymous_id, resolved email, or
+    resolved name, per the requirement that both should be searchable.
+    """
+    if not search:
+        return "", ()
+    pattern = f"%{search}%"
+    return (
+        "WHERE v.anonymous_id ILIKE %s OR r.email ILIKE %s OR r.name ILIKE %s",
+        (pattern, pattern, pattern),
+    )
+
+
+async def get_visitor_count(search: str | None) -> int:
+    where_clause, params = _visitor_search_clause(search)
+
+    async with get_connection() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                f"""
+                WITH visitor_activity AS (
+                    SELECT anonymous_id
+                    FROM rudder_schema.pages
+                    GROUP BY anonymous_id
+                ),
+                resolved AS (
+                    SELECT DISTINCT ON (anonymous_id)
+                        anonymous_id, context_traits_email AS email, context_traits_name AS name
+                    FROM rudder_schema.identifies
+                    ORDER BY anonymous_id, timestamp DESC
+                )
+                SELECT COUNT(*)
+                FROM visitor_activity v
+                LEFT JOIN resolved r ON r.anonymous_id = v.anonymous_id
+                {where_clause}
+                """,
+                params,
+            )
+            row = await cur.fetchone()
+            return row[0] if row else 0
+
+
+async def get_visitors_page(search: str | None, limit: int, offset: int) -> list[VisitorSummaryRow]:
+    """
+    Paginated visitor list for the journey selector, sourced from
+    pages only (cheap, correct -- every visitor has at least one page
+    view). NOT the full 23-table union used by get_user_journey_events
+    -- that stays scoped to a single visitor's detail page.
+    """
+    where_clause, where_params = _visitor_search_clause(search)
+
+    async with get_connection() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                f"""
+                WITH visitor_activity AS (
+                    SELECT anonymous_id, MIN(timestamp) AS first_seen, MAX(timestamp) AS last_seen
+                    FROM rudder_schema.pages
+                    GROUP BY anonymous_id
+                ),
+                resolved AS (
+                    SELECT DISTINCT ON (anonymous_id)
+                        anonymous_id, context_traits_email AS email, context_traits_name AS name
+                    FROM rudder_schema.identifies
+                    ORDER BY anonymous_id, timestamp DESC
+                )
+                SELECT v.anonymous_id, r.email, r.name, v.first_seen, v.last_seen
+                FROM visitor_activity v
+                LEFT JOIN resolved r ON r.anonymous_id = v.anonymous_id
+                {where_clause}
+                ORDER BY v.last_seen DESC
+                LIMIT %s OFFSET %s
+                """,
+                (*where_params, limit, offset),
+            )
+            rows = await cur.fetchall()
+            return [
+                VisitorSummaryRow(
+                    anonymous_id=r[0], email=r[1], name=r[2],
+                    first_seen=str(r[3]), last_seen=str(r[4]),
+                )
+                for r in rows
+            ]
