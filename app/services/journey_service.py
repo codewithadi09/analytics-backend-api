@@ -10,6 +10,10 @@ All summary stats (total_events, session_count, first_seen, last_seen,
 has_converted) are computed here from the one event list the
 repository already fetched -- no reason to re-query the database for
 data derivable from rows already in hand.
+
+first_seen/last_seen are always the true chronological earliest/latest
+event, independent of sort_order -- sort_order only affects the order
+of the events list itself, not what counts as "first" or "last".
 """
 
 import logging
@@ -27,14 +31,24 @@ class UserNotFoundError(Exception):
     """Raised when anonymous_id has zero events across every source table."""
 
 
-async def get_user_journey(anonymous_id: str) -> UserJourneyResponse:
-    rows = await get_user_journey_events(anonymous_id)
+async def get_user_journey(
+    anonymous_id: str, sort_order: str = "asc"
+) -> UserJourneyResponse:
+    rows = await get_user_journey_events(anonymous_id, sort_order)
 
     if not rows:
         raise UserNotFoundError(f"No journey found for anonymous_id={anonymous_id}")
 
     session_ids = {r.session_id for r in rows if r.session_id is not None}
     has_converted = any(r.event_type == "form_submit_success" for r in rows)
+
+    # rows[0]/rows[-1] are only "first"/"last" chronologically when
+    # sort_order is asc -- compute these independent of display order
+    # instead of trusting list position, so desc mode still reports
+    # the correct first_seen/last_seen rather than swapped values.
+    timestamps = [r.timestamp for r in rows]
+    first_seen = min(timestamps)
+    last_seen = max(timestamps)
 
     identity_row = await get_resolved_identity(anonymous_id)
     resolved_identity = (
@@ -59,8 +73,8 @@ async def get_user_journey(anonymous_id: str) -> UserJourneyResponse:
         resolved_identity=resolved_identity,
         total_events=len(rows),
         session_count=len(session_ids),
-        first_seen=rows[0].timestamp,
-        last_seen=rows[-1].timestamp,
+        first_seen=first_seen,
+        last_seen=last_seen,
         has_converted=has_converted,
         events=events,
     )

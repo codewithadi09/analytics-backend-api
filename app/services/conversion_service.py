@@ -16,6 +16,7 @@ section), not because completion genuinely precedes starting.
 """
 
 import logging
+from datetime import date
 
 from app.core.constants import CacheTTL, RedisKeyPrefix, build_redis_key
 from app.core.redis_client import get_redis
@@ -25,8 +26,18 @@ from app.schemas.conversion import ConversionFunnelResponse, ConversionFunnelSte
 logger = logging.getLogger(__name__)
 
 
-async def get_conversion_funnel() -> ConversionFunnelResponse:
-    cache_key = build_redis_key(RedisKeyPrefix.CACHE, "conversion", "funnel")
+def _date_cache_segment(start_date: date | None, end_date: date | None) -> str:
+    start_str = start_date.isoformat() if start_date else "all"
+    end_str = end_date.isoformat() if end_date else "all"
+    return f"{start_str}_{end_str}"
+
+
+async def get_conversion_funnel(
+    start_date: date | None = None, end_date: date | None = None
+) -> ConversionFunnelResponse:
+    cache_key = build_redis_key(
+        RedisKeyPrefix.CACHE, "conversion", "funnel", _date_cache_segment(start_date, end_date)
+    )
     redis = await get_redis()
 
     cached = await redis.get(cache_key)
@@ -34,7 +45,7 @@ async def get_conversion_funnel() -> ConversionFunnelResponse:
         logger.info("Conversion funnel served from cache")
         return ConversionFunnelResponse.model_validate_json(cached)
 
-    rows = await get_funnel_step_counts()
+    rows = await get_funnel_step_counts(start_date, end_date)
 
     if not rows:
         response = ConversionFunnelResponse(steps=[])

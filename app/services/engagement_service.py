@@ -4,11 +4,13 @@ Services & Content Engagement business logic.
 Combines three independent queries (page engagement, milestone
 breakdown, content engagement) concurrently and caches the result as
 one blob, same reasoning as Domain 1: a dashboard load always needs
-all three pieces together.
+all three pieces together. Cached per date range, same pattern as
+every other filtered domain.
 """
 
 import asyncio
 import logging
+from datetime import date
 
 from app.core.constants import CacheTTL, RedisKeyPrefix, build_redis_key
 from app.core.redis_client import get_redis
@@ -27,8 +29,18 @@ from app.schemas.engagement import (
 logger = logging.getLogger(__name__)
 
 
-async def get_engagement_overview() -> ServicesContentEngagementResponse:
-    cache_key = build_redis_key(RedisKeyPrefix.CACHE, "engagement", "overview")
+def _date_cache_segment(start_date: date | None, end_date: date | None) -> str:
+    start_str = start_date.isoformat() if start_date else "all"
+    end_str = end_date.isoformat() if end_date else "all"
+    return f"{start_str}_{end_str}"
+
+
+async def get_engagement_overview(
+    start_date: date | None = None, end_date: date | None = None
+) -> ServicesContentEngagementResponse:
+    cache_key = build_redis_key(
+        RedisKeyPrefix.CACHE, "engagement", "overview", _date_cache_segment(start_date, end_date)
+    )
     redis = await get_redis()
 
     cached = await redis.get(cache_key)
@@ -37,9 +49,9 @@ async def get_engagement_overview() -> ServicesContentEngagementResponse:
         return ServicesContentEngagementResponse.model_validate_json(cached)
 
     page_rows, milestone_rows, content_rows = await asyncio.gather(
-        get_page_engagement(),
-        get_milestone_breakdown(),
-        get_content_engagement(),
+        get_page_engagement(start_date, end_date),
+        get_milestone_breakdown(start_date, end_date),
+        get_content_engagement(start_date, end_date),
     )
 
     response = ServicesContentEngagementResponse(

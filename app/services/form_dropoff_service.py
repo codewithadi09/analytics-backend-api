@@ -9,6 +9,7 @@ percentage without being where most real people actually get stuck.
 """
 
 import logging
+from datetime import date
 
 from app.core.constants import CacheTTL, RedisKeyPrefix, build_redis_key
 from app.core.redis_client import get_redis
@@ -18,8 +19,18 @@ from app.schemas.form_dropoff import FieldDropoff, FormFieldDropoffResponse
 logger = logging.getLogger(__name__)
 
 
-async def get_form_dropoff_overview() -> FormFieldDropoffResponse:
-    cache_key = build_redis_key(RedisKeyPrefix.CACHE, "form_dropoff", "overview")
+def _date_cache_segment(start_date: date | None, end_date: date | None) -> str:
+    start_str = start_date.isoformat() if start_date else "all"
+    end_str = end_date.isoformat() if end_date else "all"
+    return f"{start_str}_{end_str}"
+
+
+async def get_form_dropoff_overview(
+    start_date: date | None = None, end_date: date | None = None
+) -> FormFieldDropoffResponse:
+    cache_key = build_redis_key(
+        RedisKeyPrefix.CACHE, "form_dropoff", "overview", _date_cache_segment(start_date, end_date)
+    )
     redis = await get_redis()
 
     cached = await redis.get(cache_key)
@@ -27,7 +38,7 @@ async def get_form_dropoff_overview() -> FormFieldDropoffResponse:
         logger.info("Form dropoff overview served from cache")
         return FormFieldDropoffResponse.model_validate_json(cached)
 
-    rows = await get_field_dropoff_stats()
+    rows = await get_field_dropoff_stats(start_date, end_date)
 
     fields: list[FieldDropoff] = []
     most_common_field: str | None = None
@@ -54,9 +65,6 @@ async def get_form_dropoff_overview() -> FormFieldDropoffResponse:
             highest_raw_dropoff = raw_dropoff
             most_common_field = row.field_name
 
-    # Only report a "most common dropoff field" if at least one visitor
-    # actually dropped off somewhere -- otherwise every field is at 0
-    # raw dropoff and naming one as "most common" would be misleading.
     if highest_raw_dropoff <= 0:
         most_common_field = None
 

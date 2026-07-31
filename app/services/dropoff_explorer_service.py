@@ -14,6 +14,7 @@ silently returning a meaningless empty/wrong result.
 """
 
 import logging
+from datetime import date
 
 from app.core.constants import FUNNEL_STEPS
 from app.repositories.dropoff_explorer_repository import (
@@ -44,20 +45,33 @@ def _validate_steps(from_step: str, to_step: str) -> None:
         )
 
 
-async def get_dropoff_summary(from_step: str, to_step: str) -> DropoffSummary:
+async def get_dropoff_summary(
+    from_step: str,
+    to_step: str,
+    start_date: date | None = None,
+    end_date: date | None = None,
+) -> DropoffSummary:
     _validate_steps(from_step, to_step)
-    count = await get_dropoff_count(from_step, to_step)
+    count = await get_dropoff_count(from_step, to_step, start_date, end_date)
     return DropoffSummary(from_step=from_step, to_step=to_step, total_dropoff=count)
 
 
 async def get_dropoff_visitors_page(
-    from_step: str, to_step: str, page: int, page_size: int
+    from_step: str,
+    to_step: str,
+    page: int,
+    page_size: int,
+    start_date: date | None = None,
+    end_date: date | None = None,
 ) -> PaginatedResponse[DropoffVisitor]:
     _validate_steps(from_step, to_step)
     offset = (page - 1) * page_size
 
-    rows = await get_dropoff_visitors(from_step, to_step, limit=page_size, offset=offset)
-    total = await get_dropoff_count(from_step, to_step)
+    rows = await get_dropoff_visitors(
+        from_step, to_step, limit=page_size, offset=offset,
+        start_date=start_date, end_date=end_date,
+    )
+    total = await get_dropoff_count(from_step, to_step, start_date, end_date)
 
     items = [
         DropoffVisitor(

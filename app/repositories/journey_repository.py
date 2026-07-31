@@ -58,7 +58,14 @@ class ResolvedIdentityRow:
     name: str | None
 
 
-def _build_events_query() -> str:
+def _build_events_query(sort_order: str) -> str:
+    """
+    sort_order must already be validated as exactly "ASC" or "DESC"
+    by the caller before reaching here -- this function trusts that
+    validation, same pattern as interaction_type trust in
+    interactions_repository.py. It's interpolated directly since SQL
+    doesn't allow ORDER BY direction to be a bound parameter.
+    """
     parts = [
         "SELECT 'page_view' AS event_category, 'page_view' AS event_type, "
         "NULL::text AS label, path AS page_path, timestamp, context_session_id "
@@ -76,21 +83,31 @@ def _build_events_query() -> str:
             f"timestamp, context_session_id "
             f"FROM rudder_schema.{table} WHERE anonymous_id = %(anon_id)s"
         )
-    return " UNION ALL ".join(parts) + " ORDER BY timestamp ASC"
+    return " UNION ALL ".join(parts) + f" ORDER BY timestamp {sort_order}"
 
 
-_EVENTS_QUERY = _build_events_query()
+_EVENTS_QUERY_ASC = _build_events_query("ASC")
+_EVENTS_QUERY_DESC = _build_events_query("DESC")
 
 
-async def get_user_journey_events(anonymous_id: str) -> list[JourneyEventRow]:
+async def get_user_journey_events(
+    anonymous_id: str, sort_order: str = "asc"
+) -> list[JourneyEventRow]:
     """
     Full chronological timeline for one visitor, across pages + all 16
     click tables + all 6 form-funnel tables. Not paginated -- bounded,
     human-scale per-visitor volume.
+
+    sort_order: "asc" (oldest first, default -- matches original
+    behavior) or "desc" (newest first). Any other value falls back to
+    "asc" rather than raising, since this is an internal function --
+    the API layer is responsible for rejecting invalid values before
+    they ever reach here.
     """
+    query = _EVENTS_QUERY_DESC if sort_order.lower() == "desc" else _EVENTS_QUERY_ASC
     async with get_connection() as conn:
         async with conn.cursor() as cur:
-            await cur.execute(_EVENTS_QUERY, {"anon_id": anonymous_id})
+            await cur.execute(query, {"anon_id": anonymous_id})
             rows = await cur.fetchall()
             return [
                 JourneyEventRow(
