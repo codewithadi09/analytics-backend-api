@@ -58,7 +58,7 @@ export function DataTable<T>({
 }: {
   columns: TableColumn<T>[];
   rows: T[];
-  rowKey: (row: T) => string;
+  rowKey: (row: T, index: number) => string;
   emptyMessage?: string;
 }) {
   if (rows.length === 0) return <EmptyState message={emptyMessage} />;
@@ -79,8 +79,8 @@ export function DataTable<T>({
           </tr>
         </thead>
         <tbody>
-          {rows.map((row) => (
-            <tr key={rowKey(row)} className="table-body-row">
+          {rows.map((row, index) => (
+            <tr key={rowKey(row, index)} className="table-body-row">
               {columns.map((col) => (
                 <td
                   key={col.key}

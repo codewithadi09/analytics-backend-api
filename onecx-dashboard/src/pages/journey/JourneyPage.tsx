@@ -1,5 +1,8 @@
-import { ComingSoon } from "@/components/ui/ComingSoon";
+import { useParams } from "react-router-dom";
+import { VisitorSelector } from "@/pages/journey/VisitorSelector";
+import { JourneyDetail } from "@/pages/journey/JourneyDetail";
 
 export function JourneyPage() {
-  return <ComingSoon title="User Journey" />;
+  const { anonymousId } = useParams();
+  return anonymousId ? <JourneyDetail /> : <VisitorSelector />;
 }
